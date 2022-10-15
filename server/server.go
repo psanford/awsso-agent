@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sso"
 	"github.com/aws/aws-sdk-go/service/ssooidc"
+	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/psanford/awsso-agent/browser"
 	"github.com/psanford/awsso-agent/client"
 	"github.com/psanford/awsso-agent/config"
@@ -28,7 +29,7 @@ var (
 )
 
 type server struct {
-	creds   map[string]*ssooidc.CreateTokenOutput
+	creds   map[string]*ssoToken
 	handler http.Handler
 	conf    *config.Config
 }
@@ -55,7 +56,7 @@ func (s *server) ListenAndServe() error {
 
 func New(conf *config.Config) *server {
 	s := &server{
-		creds: make(map[string]*ssooidc.CreateTokenOutput),
+		creds: make(map[string]*ssoToken),
 		conf:  conf,
 	}
 
@@ -64,7 +65,7 @@ func New(conf *config.Config) *server {
 	mux.HandleFunc("/ping", s.handlePing)
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/list_accounts_roles", s.handleListAccountRoles)
-	// mux.HandleFunc("/session", s.handleSession)
+	mux.HandleFunc("/session", s.handleSession)
 
 	s.handler = mux
 
@@ -107,6 +108,92 @@ func (s *server) confirmUserPresence(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	profile, err := s.conf.FindProfile(r.FormValue("profile_id"))
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, err.Error())
+		return
+	}
+
+	creds := s.creds[profile.ID]
+
+	if creds == nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "No creds available")
+		return
+	}
+
+	err = s.confirmUserPresence(r.Context())
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, err.Error())
+		return
+	}
+
+	if creds.Expiration.Before(time.Now()) {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "creds expired: %s", creds.Expiration)
+		return
+	}
+
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(profile.Region),
+	})
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "aws new session error: %s", err)
+		return
+	}
+
+	r.ParseForm()
+	roleName := r.Form.Get("role_name")
+	accountID := r.Form.Get("account_id")
+	accountName := r.Form.Get("accountName")
+	if accountName == "" {
+		accountName = "role"
+	}
+
+	ssoService := sso.New(sess)
+	roleResp, err := ssoService.GetRoleCredentials(&sso.GetRoleCredentialsInput{
+		AccessToken: creds.AccessToken,
+		AccountId:   &accountID,
+		RoleName:    &roleName,
+	})
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "aws get-role-credentials error: %s", err)
+		return
+	}
+
+	exp := time.UnixMilli(*roleResp.RoleCredentials.Expiration)
+	outCreds := sts.Credentials{
+		AccessKeyId:     roleResp.RoleCredentials.AccessKeyId,
+		SecretAccessKey: roleResp.RoleCredentials.SecretAccessKey,
+		SessionToken:    roleResp.RoleCredentials.SessionToken,
+		Expiration:      &exp,
+	}
+
+	result := messages.Credentials{
+		Credentials: &outCreds,
+		Region:      profile.Region,
+	}
+
+	resultJson, err := json.Marshal(result)
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "marshal json error: %s", err)
+		return
+	}
+
+	_, err = w.Write(resultJson)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +276,12 @@ OUTER:
 		return
 	}
 
-	s.creds[profile.ID] = completedToken
+	tok := ssoToken{
+		CreateTokenOutput: *completedToken,
+		Expiration:        time.Now().Add(time.Duration(*completedToken.ExpiresIn) * time.Second),
+	}
+
+	s.creds[profile.ID] = &tok
 	fmt.Fprintf(w, "ok!")
 }
 
@@ -327,4 +419,9 @@ func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) 
 	}
 
 	json.NewEncoder(w).Encode(roleResult)
+}
+
+type ssoToken struct {
+	ssooidc.CreateTokenOutput
+	Expiration time.Time
 }

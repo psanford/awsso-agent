@@ -1,6 +1,10 @@
 package messages
 
-import "github.com/aws/aws-sdk-go/service/sts"
+import (
+	"fmt"
+
+	"github.com/aws/aws-sdk-go/service/sts"
+)
 
 type Credentials struct {
 	*sts.Credentials
@@ -16,4 +20,8 @@ type Account struct {
 	Name  string   `json:"name"`
 	Email string   `json:"email"`
 	Roles []string `json:"roles"`
+}
+
+func (a *Account) RoleString(role string) string {
+	return fmt.Sprintf("%s-%s-%s", a.Name, a.ID, role)
 }

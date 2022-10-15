@@ -23,6 +23,9 @@ var (
 	execCmd               string
 	printEnv              bool
 	timeoutMinutesSession int
+	accountIDF            string
+	roleNameF             string
+	accountNameF          string
 
 	rootCmd = &cobra.Command{
 		Use:   "awsso",
@@ -40,8 +43,6 @@ func main() {
 	rootCmd.AddCommand(serverCommand())
 	rootCmd.AddCommand(sessionCommand())
 	rootCmd.AddCommand(listAccountsCommand())
-	// rootCmd.AddCommand(assumeRoleCommand())
-	// rootCmd.AddCommand(webCommand())
 
 	err := rootCmd.Execute()
 	if err != nil {
@@ -97,6 +98,9 @@ func sessionCommand() *cobra.Command {
 		Run:   sessionAction,
 	}
 
+	cmd.Flags().StringVarP(&accountIDF, "account-id", "", "", "Account ID")
+	cmd.Flags().StringVarP(&roleNameF, "role", "", "", "Role Name")
+	cmd.Flags().StringVarP(&accountNameF, "name", "", "", "Account Name (friendly)")
 	cmd.Flags().BoolVarP(&printEnv, "print", "", false, "Print ENV settings")
 	cmd.Flags().IntVarP(&timeoutMinutesSession, "timeout-minutes", "", 30, "Session Timeout in minutes")
 	cmd.Flags().StringVarP(&execCmd, "exec", "", "", "Exec command instead of dropping to shell")
@@ -105,18 +109,64 @@ func sessionCommand() *cobra.Command {
 }
 
 func sessionAction(cmd *cobra.Command, args []string) {
+	var (
+		accountID   string
+		roleName    string
+		accountName string
+	)
+
 	client := client.NewClient()
 	err := client.Ping()
 	if err != nil {
 		log.Fatalf("Server communication error: %s", err)
 	}
-	timeoutSeconds := timeoutMinutesSession * 60
-	creds, err := client.Session(profileID, timeoutSeconds)
+
+	if accountIDF != "" && roleNameF != "" {
+		accountID = accountIDF
+		roleName = roleNameF
+		accountName = accountNameF
+	} else if len(args) == 1 {
+		given := args[0]
+
+		validAccounts, _ := client.ListAccountsRoles(profileID)
+		for _, acct := range validAccounts.Accounts {
+			if len(acct.Roles) < 1 {
+				continue
+			}
+			if given == acct.ID {
+				accountID = acct.ID
+				accountName = acct.Name
+				roleName = acct.Roles[0]
+				break
+			} else {
+				for _, role := range acct.Roles {
+					if given == acct.RoleString(role) {
+						accountID = acct.ID
+						accountName = acct.Name
+						roleName = role
+						break
+					}
+				}
+			}
+		}
+	} else {
+		log.Fatalf("usage: assume <account_id|long-account-id> [--account-id <id>, --role <role>, --name <friendly-name>]")
+	}
+
+	if accountID == "" || roleName == "" {
+		log.Fatalf("Invalid account")
+	}
+
+	creds, err := client.Session(profileID, accountID, roleName, accountName)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	startEnvOrPrint(creds, "mommy-session")
+	if accountName == "" {
+		accountName = fmt.Sprintf("%s-%s", accountID, roleName)
+	}
+
+	startEnvOrPrint(creds, accountName)
 }
 
 func startEnvOrPrint(creds *messages.Credentials, name string) {

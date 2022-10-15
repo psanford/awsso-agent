@@ -121,14 +121,12 @@ func (c *Client) AssumeRole(providerID, accountID, roleName, accountName string,
 	return &creds, nil
 }
 
-func (c *Client) Session(providerID string, timeoutSeconds int) (*messages.Credentials, error) {
+func (c *Client) Session(providerID, accountID, roleName, accountName string) (*messages.Credentials, error) {
 	data := make(url.Values)
-	if timeoutSeconds > 0 {
-		data.Set("timeout_seconds", strconv.Itoa(timeoutSeconds))
-	}
-
+	data.Set("account_id", accountID)
+	data.Set("role_name", roleName)
+	data.Set("account_name", accountName)
 	data.Set("profile_id", providerID)
-
 	resp, err := c.httpClient.PostForm(fakeHost+"/session", data)
 	if err != nil {
 		return nil, err
@@ -138,7 +136,7 @@ func (c *Client) Session(providerID string, timeoutSeconds int) (*messages.Crede
 		return nil, err
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Bad response from server: %d\n%s\n", resp.StatusCode, body)
+		return nil, fmt.Errorf("Bad response from server: %d body=<%s>", resp.StatusCode, body)
 	}
 
 	var creds messages.Credentials
@@ -150,9 +148,9 @@ func (c *Client) Session(providerID string, timeoutSeconds int) (*messages.Crede
 	return &creds, nil
 }
 
-func (c *Client) ListAccountsRoles(providerID string) (*messages.ListAccountsRolesResult, error) {
+func (c *Client) ListAccountsRoles(profileID string) (*messages.ListAccountsRolesResult, error) {
 	data := make(url.Values)
-	data.Set("profile_id", providerID)
+	data.Set("profile_id", profileID)
 
 	resp, err := c.httpClient.PostForm(fakeHost+"/list_accounts_roles", data)
 	if err != nil {
