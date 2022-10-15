@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -83,7 +84,22 @@ func LoadConfig() Config {
 		panic(fmt.Sprintf("fido-key-handles not set in config file"))
 	}
 
+	names := make(map[string]struct{})
+
 	for i, p := range conf.Profile {
+		if p.ID == "" {
+			log.Fatalf("profile idx=%d is missing required id field", i)
+		}
+		_, exists := names[p.ID]
+		if exists {
+			log.Fatalf("profile id %q exists multiple times", p.ID)
+		}
+		names[p.ID] = struct{}{}
+
+		if p.StartUrl == "" {
+			log.Fatalf("profile id=%s idx=%d is missing required start-url field", p.ID, i)
+		}
+
 		if p.Region == "" {
 			p.Region = AWSDefaultRegion
 		}

@@ -13,10 +13,12 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/sso"
 	"github.com/aws/aws-sdk-go/service/ssooidc"
 	"github.com/psanford/awsso-agent/browser"
 	"github.com/psanford/awsso-agent/client"
 	"github.com/psanford/awsso-agent/config"
+	"github.com/psanford/awsso-agent/messages"
 	"github.com/psanford/awsso-agent/pinentry"
 	"github.com/psanford/awsso-agent/u2f"
 )
@@ -61,6 +63,7 @@ func New(conf *config.Config) *server {
 
 	mux.HandleFunc("/ping", s.handlePing)
 	mux.HandleFunc("/login", s.handleLogin)
+	mux.HandleFunc("/list_accounts_roles", s.handleListAccountRoles)
 	// mux.HandleFunc("/session", s.handleSession)
 
 	s.handler = mux
@@ -186,7 +189,7 @@ OUTER:
 		return
 	}
 
-	s.creds[profile.AccountID] = completedToken
+	s.creds[profile.ID] = completedToken
 	fmt.Fprintf(w, "ok!")
 }
 
@@ -249,4 +252,79 @@ type oidcDeviceCreds struct {
 	ClientIDIssuedAt      int64  `json:"clientIdIssuedAt"`
 	ClientSecret          string `json:"clientSecret"`
 	ClientSecretExpiresAt int64  `json:"clientSecretExpiresAt"`
+}
+
+func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	r.ParseForm()
+
+	profile, err := s.conf.FindProfile(r.FormValue("profile_id"))
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, err.Error())
+		return
+	}
+
+	cred := s.creds[profile.ID]
+	if cred == nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "no creds available")
+		return
+	}
+
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(profile.Region),
+	})
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "aws new session err: %s", err)
+		return
+	}
+
+	ssoService := sso.New(sess)
+
+	var roleResult messages.ListAccountsRolesResult
+
+	acctInput := &sso.ListAccountsInput{
+		AccessToken: cred.AccessToken,
+	}
+
+	err = ssoService.ListAccountsPages(acctInput, func(lao *sso.ListAccountsOutput, b bool) bool {
+		for _, acct := range lao.AccountList {
+			outAcct := messages.Account{
+				ID:    *acct.AccountId,
+				Name:  *acct.AccountName,
+				Email: *acct.EmailAddress,
+			}
+
+			roleInput := &sso.ListAccountRolesInput{
+				AccessToken: cred.AccessToken,
+				AccountId:   &outAcct.ID,
+			}
+			err = ssoService.ListAccountRolesPagesWithContext(ctx, roleInput, func(laro *sso.ListAccountRolesOutput, b bool) bool {
+				for _, role := range laro.RoleList {
+					outAcct.Roles = append(outAcct.Roles, *role.RoleName)
+				}
+				return true
+			})
+
+			if err != nil {
+				w.WriteHeader(400)
+				fmt.Fprintf(w, "list roles err: %s", err)
+				return false
+			}
+
+			roleResult.Accounts = append(roleResult.Accounts, outAcct)
+
+		}
+
+		return true
+	})
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "list accounts err: %s", err)
+		return
+	}
+
+	json.NewEncoder(w).Encode(roleResult)
 }

@@ -39,7 +39,7 @@ func main() {
 	rootCmd.AddCommand(loginCommand())
 	rootCmd.AddCommand(serverCommand())
 	rootCmd.AddCommand(sessionCommand())
-	// rootCmd.AddCommand(listAccountsCommand())
+	rootCmd.AddCommand(listAccountsCommand())
 	// rootCmd.AddCommand(assumeRoleCommand())
 	// rootCmd.AddCommand(webCommand())
 
@@ -205,6 +205,34 @@ func (e *environ) Unset(key string) {
 func (e *environ) Set(key, val string) {
 	e.Unset(key)
 	*e = append(*e, key+"="+val)
+}
+
+func listAccountsCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list-accounts",
+		Short: "list accounts+roles",
+		Run:   listAccountsAction,
+	}
+
+	return cmd
+}
+
+func listAccountsAction(cmd *cobra.Command, args []string) {
+	client := client.NewClient()
+	err := client.Ping()
+	if err != nil {
+		log.Fatalf("Server communication error: %s", err)
+	}
+	accts, err := client.ListAccountsRoles(profileID)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, acct := range accts.Accounts {
+		for _, role := range acct.Roles {
+			fmt.Printf("%s %s %s %s\n", acct.Name, acct.ID, role, acct.Email)
+		}
+	}
 }
 
 func u2fRegisterCommand() *cobra.Command {

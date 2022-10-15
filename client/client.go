@@ -149,3 +149,28 @@ func (c *Client) Session(providerID string, timeoutSeconds int) (*messages.Crede
 
 	return &creds, nil
 }
+
+func (c *Client) ListAccountsRoles(providerID string) (*messages.ListAccountsRolesResult, error) {
+	data := make(url.Values)
+	data.Set("profile_id", providerID)
+
+	resp, err := c.httpClient.PostForm(fakeHost+"/list_accounts_roles", data)
+	if err != nil {
+		return nil, err
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Bad response from server: %d\n%s\n", resp.StatusCode, body)
+	}
+
+	var accts messages.ListAccountsRolesResult
+	err = json.Unmarshal(body, &accts)
+	if err != nil {
+		return nil, fmt.Errorf("Unmarshal json resp err: %s, body: <%s>", err, body)
+	}
+
+	return &accts, nil
+}
