@@ -105,7 +105,25 @@ func sessionCommand() *cobra.Command {
 	cmd.Flags().IntVarP(&timeoutMinutesSession, "timeout-minutes", "", 30, "Session Timeout in minutes")
 	cmd.Flags().StringVarP(&execCmd, "exec", "", "", "Exec command instead of dropping to shell")
 
+	cmd.ValidArgsFunction = sessionCompletions
+
 	return cmd
+}
+
+func sessionCompletions(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	accounts := config.CachedAccounts(profileID)
+
+	var completions []string
+	for _, account := range accounts {
+		if strings.HasPrefix(account.String(), toComplete) {
+			completions = append(completions, account.String())
+		}
+		if strings.HasPrefix(account.AccountID, toComplete) {
+			completions = append(completions, account.AccountID)
+		}
+	}
+
+	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
 func sessionAction(cmd *cobra.Command, args []string) {
