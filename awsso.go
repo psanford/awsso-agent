@@ -38,6 +38,15 @@ func main() {
 
 	rootCmd.PersistentFlags().StringVarP(&profileID, "profile", "p", "", "Profile ID to use (defaults to first in config file)")
 
+	rootCmd.RegisterFlagCompletionFunc("profile", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		c := config.LoadConfig()
+		var ids []string
+		for _, prof := range c.Profile {
+			ids = append(ids, prof.ID)
+		}
+		return ids, cobra.ShellCompDirectiveNoFileComp
+	})
+
 	rootCmd.AddCommand(u2fRegisterCommand())
 	rootCmd.AddCommand(loginCommand())
 	rootCmd.AddCommand(serverCommand())
