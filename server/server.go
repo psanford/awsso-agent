@@ -77,6 +77,10 @@ func (s *server) handlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) confirmUserPresence(ctx context.Context) error {
+	if len(s.conf.FidoKeyHandles) == 0 && s.conf.AllowNoUserVerify {
+		return nil
+	}
+
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

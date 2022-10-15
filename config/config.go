@@ -15,8 +15,9 @@ import (
 )
 
 type Config struct {
-	FidoKeyHandles []string  `toml:"fido-key-handles"`
-	Profile        []Profile `toml:"profile"`
+	FidoKeyHandles    []string  `toml:"fido-key-handles"`
+	AllowNoUserVerify bool      `toml:"allow-no-user-verify"`
+	Profile           []Profile `toml:"profile"`
 }
 
 type Profile struct {
@@ -83,8 +84,8 @@ func LoadConfig() Config {
 	}
 
 	// TODO(psanford): Make this optional
-	if len(conf.FidoKeyHandles) < 1 {
-		panic(fmt.Sprintf("fido-key-handles not set in config file"))
+	if len(conf.FidoKeyHandles) < 1 && !conf.AllowNoUserVerify {
+		panic(fmt.Sprintf("no fido-key-handles found in config file, and allow-no-user-verify is false"))
 	}
 
 	names := make(map[string]struct{})
