@@ -47,7 +47,7 @@ func main() {
 		return ids, cobra.ShellCompDirectiveNoFileComp
 	})
 
-	rootCmd.AddCommand(u2fRegisterCommand())
+	rootCmd.AddCommand(fidoRegisterCommand())
 	rootCmd.AddCommand(loginCommand())
 	rootCmd.AddCommand(serverCommand())
 	rootCmd.AddCommand(sessionCommand())
@@ -318,15 +318,15 @@ func listAccountsAction(cmd *cobra.Command, args []string) {
 	}
 }
 
-func u2fRegisterCommand() *cobra.Command {
+func fidoRegisterCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "u2f-register",
-		Short: "register a u2f device",
-		Run:   u2fRegisterAction,
+		Use:   "fido-register",
+		Short: "register a fido device",
+		Run:   fidoRegisterAction,
 	}
 }
 
-func u2fRegisterAction(cmd *cobra.Command, args []string) {
+func fidoRegisterAction(cmd *cobra.Command, args []string) {
 	handle, err := u2f.RegisterDevice()
 	if err != nil {
 		log.Fatal(err)
