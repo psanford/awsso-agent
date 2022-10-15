@@ -2,7 +2,7 @@
 
 `awsso` is a credential agent for AWS SSO (AWS IAM Identity Center) credentials. You can think of it like "an ssh-agent but for AWS SSO credentials".
 
-The SSO token is cached only in memory of the agent token. The agent will use that token to provide the requested sts credentials (after authenticating).
+The SSO token is cached only in memory (not on disk). The agent will use that token to provide the requested sts credentials (after authenticating).
 
 ## Building
 
