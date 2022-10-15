@@ -128,25 +128,21 @@ func sessionAction(cmd *cobra.Command, args []string) {
 	} else if len(args) == 1 {
 		given := args[0]
 
-		validAccounts, _ := client.ListAccountsRoles(profileID)
-		for _, acct := range validAccounts.Accounts {
-			if len(acct.Roles) < 1 {
-				continue
+		validAccounts := config.CachedAccounts(profileID)
+		if len(validAccounts) == 0 {
+			larr, err := client.ListAccountsRoles(profileID)
+			if err != nil {
+				log.Fatalf("Failed to find any valid accounts either from cache or from ListAccounts")
 			}
-			if given == acct.ID {
-				accountID = acct.ID
-				accountName = acct.Name
-				roleName = acct.Roles[0]
+			validAccounts = larr.Accounts
+
+		}
+		for _, acct := range validAccounts {
+			if given == acct.String() || given == acct.AccountID {
+				accountID = acct.AccountID
+				accountName = acct.AccountName
+				roleName = acct.RoleName
 				break
-			} else {
-				for _, role := range acct.Roles {
-					if given == acct.RoleString(role) {
-						accountID = acct.ID
-						accountName = acct.Name
-						roleName = role
-						break
-					}
-				}
 			}
 		}
 	} else {
@@ -278,9 +274,19 @@ func listAccountsAction(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
+	var cacheF *os.File
+	acctCachePath := config.AccountCachePath(profileID)
+	if acctCachePath != "" {
+		cacheF, err = os.Create(acctCachePath)
+		if err == nil {
+			defer cacheF.Close()
+		}
+	}
+
 	for _, acct := range accts.Accounts {
-		for _, role := range acct.Roles {
-			fmt.Printf("%s %s %s %s\n", acct.Name, acct.ID, role, acct.Email)
+		fmt.Printf("%s %s %s %s\n", acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail)
+		if cacheF != nil {
+			fmt.Fprintf(cacheF, "%s %s %s %s\n", acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail)
 		}
 	}
 }

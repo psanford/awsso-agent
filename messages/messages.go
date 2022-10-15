@@ -16,12 +16,12 @@ type ListAccountsRolesResult struct {
 }
 
 type Account struct {
-	ID    string   `json:"id"`
-	Name  string   `json:"name"`
-	Email string   `json:"email"`
-	Roles []string `json:"roles"`
+	AccountName  string `json:"name"`
+	AccountID    string `json:"id"`
+	RoleName     string `json:"role"`
+	AccountEmail string `json:"email"`
 }
 
-func (a *Account) RoleString(role string) string {
-	return fmt.Sprintf("%s-%s-%s", a.Name, a.ID, role)
+func (a *Account) String() string {
+	return fmt.Sprintf("%s-%s-%s", a.AccountName, a.AccountID, a.RoleName)
 }

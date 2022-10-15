@@ -1,14 +1,17 @@
 package config
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/psanford/awsso-agent/messages"
 )
 
 type Config struct {
@@ -125,4 +128,58 @@ func OIDCCachePath() string {
 	os.MkdirAll(dir, 0755)
 
 	return filepath.Join(dir, "awsso.cached-oidc-client")
+}
+
+func AccountCachePath(profileID string) string {
+	if profileID == "" {
+		c := LoadConfig()
+		profile, err := c.FindProfile(profileID)
+		if err != nil {
+			return ""
+		}
+		profileID = profile.ID
+	}
+
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(cacheDir, "awsso")
+	os.MkdirAll(dir, 0755)
+
+	return filepath.Join(dir, fmt.Sprintf("awsso.accts.%s.cache", profileID))
+}
+
+func CachedAccounts(profileID string) []messages.Account {
+	path := AccountCachePath(profileID)
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var out []messages.Account
+
+	r := bufio.NewReader(f)
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			break
+		}
+
+		line = strings.TrimSpace(line)
+
+		parts := strings.SplitN(line, " ", 4)
+		if len(parts) < 3 {
+			continue
+		}
+		out = append(out, messages.Account{
+			AccountName:  parts[0],
+			AccountID:    parts[1],
+			RoleName:     parts[2],
+			AccountEmail: parts[3],
+		})
+	}
+	return out
 }

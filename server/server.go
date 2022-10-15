@@ -383,19 +383,18 @@ func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) 
 
 	err = ssoService.ListAccountsPages(acctInput, func(lao *sso.ListAccountsOutput, b bool) bool {
 		for _, acct := range lao.AccountList {
-			outAcct := messages.Account{
-				ID:    *acct.AccountId,
-				Name:  *acct.AccountName,
-				Email: *acct.EmailAddress,
-			}
-
 			roleInput := &sso.ListAccountRolesInput{
 				AccessToken: cred.AccessToken,
-				AccountId:   &outAcct.ID,
+				AccountId:   acct.AccountId,
 			}
 			err = ssoService.ListAccountRolesPagesWithContext(ctx, roleInput, func(laro *sso.ListAccountRolesOutput, b bool) bool {
 				for _, role := range laro.RoleList {
-					outAcct.Roles = append(outAcct.Roles, *role.RoleName)
+					roleResult.Accounts = append(roleResult.Accounts, messages.Account{
+						AccountID:    *acct.AccountId,
+						AccountName:  *acct.AccountName,
+						AccountEmail: *acct.EmailAddress,
+						RoleName:     *role.RoleName,
+					})
 				}
 				return true
 			})
@@ -405,8 +404,6 @@ func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) 
 				fmt.Fprintf(w, "list roles err: %s", err)
 				return false
 			}
-
-			roleResult.Accounts = append(roleResult.Accounts, outAcct)
 
 		}
 
