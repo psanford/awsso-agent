@@ -83,13 +83,30 @@ func LoadConfig() Config {
 		panic(fmt.Sprintf("fido-key-handles not set in config file"))
 	}
 
+	for i, p := range conf.Profile {
+		if p.Region == "" {
+			p.Region = AWSDefaultRegion
+		}
+		if p.Partition == "" {
+			p.Partition = AWSDefaultPartition
+		}
+		conf.Profile[i] = p
+	}
+
 	return conf
 }
 
-// SSOCachePath is the path we store the credentials initially
+// OIDCCachePath is the path we store the credentials initially
 // registered with AWS pre authentication. These are not user
 // credentials and cannot be used by themselves to gain account
 // access.
-func SSOCachePath() string {
-	return filepath.Join(confDir(), ".cached-client")
+func OIDCCachePath() string {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		panic(err)
+	}
+	dir := filepath.Join(cacheDir, "awsso")
+	os.MkdirAll(dir, 0755)
+
+	return filepath.Join(dir, "awsso.cached-oidc-client")
 }
