@@ -173,7 +173,7 @@ func sessionAction(cmd *cobra.Command, args []string) {
 			}
 		}
 	} else {
-		log.Fatalf("usage: assume <account_id|long-account-id> [--account-id <id>, --role <role>, --name <friendly-name>]")
+		log.Fatalf("usage: session <account_id|long-account-id> [--account-id <id>, --role <role>, --name <friendly-name>]")
 	}
 
 	if accountID == "" || roleName == "" {
