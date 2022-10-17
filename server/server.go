@@ -114,6 +114,13 @@ func (s *server) confirmUserPresence(ctx context.Context) error {
 	return nil
 }
 
+func (c *server) awsSession(profile config.Profile) (*session.Session, error) {
+	return session.NewSession(&aws.Config{
+		// LogLevel: aws.LogLevel(aws.LogDebug),
+		Region: aws.String(profile.Region),
+	})
+}
+
 func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 
@@ -211,9 +218,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(profile.Region),
-	})
+	sess, err := s.awsSession(profile)
 	if err != nil {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, "aws new session error: %s", err)
@@ -368,9 +373,7 @@ func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(profile.Region),
-	})
+	sess, err := s.awsSession(profile)
 	if err != nil {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, "aws new session err: %s", err)

@@ -26,9 +26,6 @@ type Profile struct {
 
 	// AWS Region. If empty string, will default to "us-east-1"
 	Region string `toml:"region"`
-	// AWS ARN partition. If empty string will default to "aws".
-	// Use this for gov and china partitions
-	Partition string `toml:"partition"`
 }
 
 func (c *Config) FindProfile(id string) (Profile, error) {
@@ -44,7 +41,6 @@ func (c *Config) FindProfile(id string) (Profile, error) {
 }
 
 var AWSDefaultRegion = "us-east-1"
-var AWSDefaultPartition = "aws"
 
 func confDir() string {
 	confDir, err := os.UserConfigDir()
@@ -105,9 +101,6 @@ func LoadConfig() Config {
 
 		if p.Region == "" {
 			p.Region = AWSDefaultRegion
-		}
-		if p.Partition == "" {
-			p.Partition = AWSDefaultPartition
 		}
 		conf.Profile[i] = p
 	}
