@@ -21,9 +21,8 @@ type Config struct {
 }
 
 type Profile struct {
-	ID        string `toml:"id"`
-	StartUrl  string `toml:"start-url"`
-	AccountID string `toml:"account-id"`
+	ID       string `toml:"id"`
+	StartUrl string `toml:"start-url"`
 
 	// AWS Region. If empty string, will default to "us-east-1"
 	Region string `toml:"region"`

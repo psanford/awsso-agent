@@ -83,7 +83,6 @@ fido-key-handles = [
 [[profile]]
 id = "default"
 start-url = "https://d-263deadbeef.awsapps.com/start"
-account-id = "153646406880"
 ```
 
 ## Running the agent as a daemon
