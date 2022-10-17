@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -10,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/psanford/awsso-agent/browser"
 	"github.com/psanford/awsso-agent/client"
 	"github.com/psanford/awsso-agent/config"
 	"github.com/psanford/awsso-agent/messages"
@@ -22,6 +27,7 @@ var (
 	profileID             string
 	execCmd               string
 	printEnv              bool
+	webConsole            bool
 	timeoutMinutesSession int
 	accountIDF            string
 	roleNameF             string
@@ -111,6 +117,7 @@ func sessionCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&roleNameF, "role", "", "", "Role Name")
 	cmd.Flags().StringVarP(&accountNameF, "name", "", "", "Account Name (friendly)")
 	cmd.Flags().BoolVarP(&printEnv, "print", "", false, "Print ENV settings")
+	cmd.Flags().BoolVarP(&webConsole, "web", "", false, "Open web console with session credentials")
 	cmd.Flags().IntVarP(&timeoutMinutesSession, "timeout-minutes", "", 30, "Session Timeout in minutes")
 	cmd.Flags().StringVarP(&execCmd, "exec", "", "", "Exec command instead of dropping to shell")
 
@@ -203,6 +210,67 @@ func startEnvOrPrint(creds *messages.Credentials, name string) {
 
 		fmt.Printf(`  export PS1="(awsso-%s)  \\[\\033[01;35m\\]\\w\\[\\033[00m\\]\\$ "`, name)
 		fmt.Println()
+	} else if webConsole {
+
+		jsonTxt, err := json.Marshal(map[string]string{
+			"sessionId":    *creds.AccessKeyId,
+			"sessionKey":   *creds.SecretAccessKey,
+			"sessionToken": *creds.SessionToken,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		loginURLPrefix := "https://signin.aws.amazon.com/federation"
+		req, err := http.NewRequest("GET", loginURLPrefix, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		q := req.URL.Query()
+		q.Add("Action", "getSigninToken")
+		q.Add("Session", string(jsonTxt))
+
+		req.URL.RawQuery = q.Encode()
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		defer resp.Body.Close()
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			log.Fatalf("getSigninToken returned non-200 status: %d", resp.StatusCode)
+		}
+
+		var signinTokenResp struct {
+			SigninToken string `json:"SigninToken"`
+		}
+
+		if err = json.Unmarshal([]byte(body), &signinTokenResp); err != nil {
+			log.Fatalf("parse signinTokenResp err: %s", err)
+		}
+
+		destination := "https://console.aws.amazon.com/"
+
+		loginURL := fmt.Sprintf(
+			"%s?Action=login&Issuer=aws-vault&Destination=%s&SigninToken=%s",
+			loginURLPrefix,
+			url.QueryEscape(destination),
+			url.QueryEscape(signinTokenResp.SigninToken),
+		)
+
+		ok := browser.Open(loginURL)
+		if !ok {
+			log.Printf("browser open failed")
+			fmt.Println("Login url:")
+			fmt.Println(loginURL)
+		}
 	} else {
 		env := environ(os.Environ())
 		env.Set("AWS_ACCESS_KEY_ID", *creds.AccessKeyId)
