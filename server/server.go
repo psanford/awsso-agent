@@ -227,7 +227,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	oidcService := ssooidc.New(sess)
 
-	deviceCreds, err := s.getOIDCCreds(oidcService)
+	deviceCreds, err := s.getOIDCCreds(oidcService, profile.ID)
 	if err != nil {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, "get device oidc creds err: %s", err)
@@ -297,10 +297,10 @@ OUTER:
 // getOIDCCreds gets the device authorized creds necessary to then perform
 // user auth. These creds have no access to any resources within an AWS account
 // on their own.
-func (s *server) getOIDCCreds(oidcService *ssooidc.SSOOIDC) (*oidcDeviceCreds, error) {
-	f, err := os.Open(config.OIDCCachePath())
+func (s *server) getOIDCCreds(oidcService *ssooidc.SSOOIDC, profileID string) (*oidcDeviceCreds, error) {
+	f, err := os.Open(config.OIDCCachePath(profileID))
 	if err != nil {
-		return s.fetchAndCacheNewOIDCCreds(oidcService)
+		return s.fetchAndCacheNewOIDCCreds(oidcService, profileID)
 	}
 
 	defer f.Close()
@@ -308,18 +308,18 @@ func (s *server) getOIDCCreds(oidcService *ssooidc.SSOOIDC) (*oidcDeviceCreds, e
 	var creds oidcDeviceCreds
 	err = dec.Decode(&creds)
 	if err != nil {
-		return s.fetchAndCacheNewOIDCCreds(oidcService)
+		return s.fetchAndCacheNewOIDCCreds(oidcService, profileID)
 	}
 
 	exp := time.Unix(creds.ClientSecretExpiresAt, 0)
 	if exp.Before(time.Now()) {
-		return s.fetchAndCacheNewOIDCCreds(oidcService)
+		return s.fetchAndCacheNewOIDCCreds(oidcService, profileID)
 	}
 
 	return &creds, nil
 }
 
-func (s *server) fetchAndCacheNewOIDCCreds(service *ssooidc.SSOOIDC) (*oidcDeviceCreds, error) {
+func (s *server) fetchAndCacheNewOIDCCreds(service *ssooidc.SSOOIDC, profileID string) (*oidcDeviceCreds, error) {
 	resp, err := service.RegisterClient(&ssooidc.RegisterClientInput{
 		ClientName: aws.String("awsesh"),
 		ClientType: aws.String("public"),
@@ -334,7 +334,7 @@ func (s *server) fetchAndCacheNewOIDCCreds(service *ssooidc.SSOOIDC) (*oidcDevic
 		ClientSecretExpiresAt: *resp.ClientSecretExpiresAt,
 	}
 
-	f, err := os.Create(config.OIDCCachePath())
+	f, err := os.Create(config.OIDCCachePath(profileID))
 	if err != nil {
 		return nil, fmt.Errorf("Create cache file for sso client id err: %w", err)
 	}

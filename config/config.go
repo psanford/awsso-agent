@@ -112,7 +112,16 @@ func LoadConfig() Config {
 // registered with AWS pre authentication. These are not user
 // credentials and cannot be used by themselves to gain account
 // access.
-func OIDCCachePath() string {
+func OIDCCachePath(profileID string) string {
+	if profileID == "" {
+		c := LoadConfig()
+		profile, err := c.FindProfile(profileID)
+		if err != nil {
+			return ""
+		}
+		profileID = profile.ID
+	}
+
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		panic(err)
@@ -120,7 +129,7 @@ func OIDCCachePath() string {
 	dir := filepath.Join(cacheDir, "awsso")
 	os.MkdirAll(dir, 0755)
 
-	return filepath.Join(dir, "awsso.cached-oidc-client")
+	return filepath.Join(dir, fmt.Sprintf("awsso.oidc-client.%s.cache", profileID))
 }
 
 func AccountCachePath(profileID string) string {
