@@ -29,7 +29,9 @@ type Profile struct {
 }
 
 func (c *Config) FindProfile(id string) (Profile, error) {
-	if id == "" {
+	if id == "" && len(c.Profile) < 1 {
+		return Profile{}, errors.New("no profiles available")
+	} else if id == "" {
 		return c.Profile[0], nil
 	}
 	for _, p := range c.Profile {
@@ -66,21 +68,20 @@ func SocketPath() string {
 	return filepath.Join(dir, "awsso.control.sock")
 }
 
-func LoadConfig() Config {
+func tryLoadConfig() (Config, error) {
 	confPath := filepath.Join(confDir(), "awsso.toml")
 	tml, err := ioutil.ReadFile(confPath)
 	if err != nil {
-		panic(err)
+		return Config{}, err
 	}
 	var conf Config
 	err = toml.Unmarshal(tml, &conf)
 	if err != nil {
-		panic(err)
+		return conf, err
 	}
 
-	// TODO(psanford): Make this optional
 	if len(conf.FidoKeyHandles) < 1 && !conf.AllowNoUserVerify {
-		panic(fmt.Sprintf("no fido-key-handles found in config file, and allow-no-user-verify is false"))
+		return conf, fmt.Errorf("no fido-key-handles found in config file, and allow-no-user-verify is false")
 	}
 
 	names := make(map[string]struct{})
@@ -105,6 +106,14 @@ func LoadConfig() Config {
 		conf.Profile[i] = p
 	}
 
+	return conf, nil
+}
+
+func LoadConfig() Config {
+	conf, err := tryLoadConfig()
+	if err != nil {
+		panic(err)
+	}
 	return conf
 }
 
@@ -114,7 +123,7 @@ func LoadConfig() Config {
 // access.
 func OIDCCachePath(profileID string) string {
 	if profileID == "" {
-		c := LoadConfig()
+		c, _ := tryLoadConfig()
 		profile, err := c.FindProfile(profileID)
 		if err != nil {
 			return ""
@@ -134,7 +143,7 @@ func OIDCCachePath(profileID string) string {
 
 func AccountCachePath(profileID string) string {
 	if profileID == "" {
-		c := LoadConfig()
+		c, _ := tryLoadConfig()
 		profile, err := c.FindProfile(profileID)
 		if err != nil {
 			return ""
