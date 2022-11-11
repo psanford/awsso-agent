@@ -2,6 +2,7 @@ package messages
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go/service/sts"
 )
@@ -23,5 +24,6 @@ type Account struct {
 }
 
 func (a *Account) String() string {
-	return fmt.Sprintf("%s-%s-%s", a.AccountName, a.AccountID, a.RoleName)
+	safeName := strings.ReplaceAll(a.AccountName, " ", "-")
+	return fmt.Sprintf("%s-%s-%s", safeName, a.AccountID, a.RoleName)
 }

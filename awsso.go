@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -378,10 +379,13 @@ func listAccountsAction(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	w := csv.NewWriter(cacheF)
+	defer w.Flush()
+
 	for _, acct := range accts.Accounts {
 		fmt.Printf("%s %s %s %s\n", acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail)
 		if cacheF != nil {
-			fmt.Fprintf(cacheF, "%s %s %s %s\n", acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail)
+			w.Write([]string{acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail})
 		}
 	}
 }

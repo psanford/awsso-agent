@@ -1,14 +1,13 @@
 package config
 
 import (
-	"bufio"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/psanford/awsso-agent/messages"
@@ -172,17 +171,14 @@ func CachedAccounts(profileID string) []messages.Account {
 
 	var out []messages.Account
 
-	r := bufio.NewReader(f)
+	r := csv.NewReader(f)
 	for {
-		line, err := r.ReadString('\n')
+		parts, err := r.Read()
 		if err != nil {
 			break
 		}
 
-		line = strings.TrimSpace(line)
-
-		parts := strings.SplitN(line, " ", 4)
-		if len(parts) < 3 {
+		if len(parts) < 4 {
 			continue
 		}
 		out = append(out, messages.Account{
