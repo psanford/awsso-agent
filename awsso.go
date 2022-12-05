@@ -33,6 +33,7 @@ var (
 	accountIDF            string
 	roleNameF             string
 	accountNameF          string
+	csvF                  bool
 
 	rootCmd = &cobra.Command{
 		Use:   "awsso",
@@ -357,6 +358,8 @@ func listAccountsCommand() *cobra.Command {
 		Run:   listAccountsAction,
 	}
 
+	rootCmd.PersistentFlags().BoolVarP(&csvF, "csv", "", false, "Output as csv")
+
 	return cmd
 }
 
@@ -380,13 +383,20 @@ func listAccountsAction(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	w := csv.NewWriter(cacheF)
-	defer w.Flush()
+	cacheW := csv.NewWriter(cacheF)
+	defer cacheW.Flush()
+
+	csvStd := csv.NewWriter(os.Stdout)
+	defer csvStd.Flush()
 
 	for _, acct := range accts.Accounts {
-		fmt.Printf("%s %s %s %s\n", acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail)
+		if csvF {
+			csvStd.Write([]string{acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail})
+		} else {
+			fmt.Printf("%s %s %s %s\n", acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail)
+		}
 		if cacheF != nil {
-			w.Write([]string{acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail})
+			cacheW.Write([]string{acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail})
 		}
 	}
 }
