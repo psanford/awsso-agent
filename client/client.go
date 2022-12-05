@@ -172,3 +172,25 @@ func (c *Client) ListAccountsRoles(profileID string) (*messages.ListAccountsRole
 
 	return &accts, nil
 }
+
+func (c *Client) ListProfiles() (*messages.ListProfilesResult, error) {
+	resp, err := c.httpClient.Get(fakeHost + "/profiles")
+	if err != nil {
+		return nil, err
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Bad response from server: %d\n%s\n", resp.StatusCode, body)
+	}
+
+	var profiles messages.ListProfilesResult
+	err = json.Unmarshal(body, &profiles)
+	if err != nil {
+		return nil, fmt.Errorf("Unmarshal json resp err: %s, body: <%s>", err, body)
+	}
+
+	return &profiles, nil
+}

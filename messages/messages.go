@@ -27,3 +27,13 @@ func (a *Account) String() string {
 	safeName := strings.ReplaceAll(a.AccountName, " ", "-")
 	return fmt.Sprintf("%s-%s-%s", safeName, a.AccountID, a.RoleName)
 }
+
+type ListProfilesResult struct {
+	Profiles []Profile `json:"profiles"`
+}
+
+type Profile struct {
+	ID       string `json:"id"`
+	StartUrl string `json:"start-url"`
+	Region   string `json:"region"`
+}

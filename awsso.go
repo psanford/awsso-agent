@@ -59,6 +59,7 @@ func main() {
 	rootCmd.AddCommand(serverCommand())
 	rootCmd.AddCommand(sessionCommand())
 	rootCmd.AddCommand(listAccountsCommand())
+	rootCmd.AddCommand(listProfilesCommand())
 
 	err := rootCmd.Execute()
 	if err != nil {
@@ -387,6 +388,32 @@ func listAccountsAction(cmd *cobra.Command, args []string) {
 		if cacheF != nil {
 			w.Write([]string{acct.AccountName, acct.AccountID, acct.RoleName, acct.AccountEmail})
 		}
+	}
+}
+
+func listProfilesCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list-profiles",
+		Short: "list profiles",
+		Run:   listProfilesAction,
+	}
+
+	return cmd
+}
+
+func listProfilesAction(cmd *cobra.Command, args []string) {
+	client := client.NewClient()
+	err := client.Ping()
+	if err != nil {
+		log.Fatalf("Server communication error: %s", err)
+	}
+	profiles, err := client.ListProfiles()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, p := range profiles.Profiles {
+		fmt.Printf("%15.15s %15.15s %s\n", p.ID, p.Region, p.StartUrl)
 	}
 }
 

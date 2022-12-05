@@ -65,6 +65,7 @@ func New(conf *config.Config) *server {
 	mux.HandleFunc("/ping", s.handlePing)
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/list_accounts_roles", s.handleListAccountRoles)
+	mux.HandleFunc("/profiles", s.handleListProfiles)
 	mux.HandleFunc("/session", s.handleSession)
 
 	s.handler = mux
@@ -423,6 +424,19 @@ func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) 
 	}
 
 	json.NewEncoder(w).Encode(roleResult)
+}
+
+func (s *server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
+	var result messages.ListProfilesResult
+	for _, p := range s.conf.Profile {
+		result.Profiles = append(result.Profiles, messages.Profile{
+			ID:       p.ID,
+			Region:   p.Region,
+			StartUrl: p.StartUrl,
+		})
+	}
+
+	json.NewEncoder(w).Encode(result)
 }
 
 type ssoToken struct {
