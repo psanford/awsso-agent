@@ -37,3 +37,10 @@ type Profile struct {
 	StartUrl string `json:"start-url"`
 	Region   string `json:"region"`
 }
+
+type LoginResponse struct {
+	Status   string
+	Error    string
+	LoginURL string
+	Result   string
+}

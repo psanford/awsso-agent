@@ -246,11 +246,14 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	flusher := w.(http.Flusher)
+
+	fmt.Fprintf(w, "Complete verification at: %s\n", *startAuthResp.VerificationUriComplete)
+	flusher.Flush()
+
 	ok := browser.Open(*startAuthResp.VerificationUriComplete)
 	if !ok {
 		fmt.Fprintf(w, "Failed to open browser\n")
-		fmt.Fprintf(w, "Complete verification at: %s\n", *startAuthResp.VerificationUriComplete)
-		flusher := w.(http.Flusher)
 		flusher.Flush()
 	}
 

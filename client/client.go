@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
@@ -77,17 +79,13 @@ func (c *Client) Login(profileID string) error {
 	if err != nil {
 		return err
 	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
+
+	io.Copy(os.Stdout, resp.Body)
+
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Bad response from server: %d\n%s\n", resp.StatusCode, body)
+		return fmt.Errorf("Bad response from server: %d\n", resp.StatusCode)
 	}
 
-	if string(body) != "ok!" {
-		return fmt.Errorf("Bad response from server: %d\n%s\n", resp.StatusCode, body)
-	}
 	return nil
 }
 
