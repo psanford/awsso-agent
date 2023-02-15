@@ -79,7 +79,7 @@ func (s *server) handlePing(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "pong")
 }
 
-func (s *server) confirmUserPresence(ctx context.Context) error {
+func (s *server) confirmUserPresence(ctx context.Context, prompt string) error {
 	if len(s.conf.FidoKeyHandles) == 0 && s.conf.AllowNoUserVerify {
 		return nil
 	}
@@ -91,7 +91,7 @@ func (s *server) confirmUserPresence(ctx context.Context) error {
 	verifyResult := make(chan error)
 
 	go func() {
-		ok, err := pinentry.Confirm(childCtx, "Tap yubikey to auth")
+		ok, err := pinentry.Confirm(childCtx, fmt.Sprintf("Tap yubikey to confirm\n%s", prompt))
 		if err != nil {
 			log.Printf("confirm err: %s", err)
 		}
@@ -129,7 +129,15 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	r.ParseForm()
 
-	profile, err := s.conf.FindProfile(r.FormValue("profile_id"))
+	profileID := r.FormValue("profile_id")
+	roleName := r.Form.Get("role_name")
+	accountID := r.Form.Get("account_id")
+	accountName := r.Form.Get("accountName")
+	if accountName == "" {
+		accountName = "role"
+	}
+
+	profile, err := s.conf.FindProfile(profileID)
 	if err != nil {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, err.Error())
@@ -146,7 +154,7 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.confirmUserPresence(r.Context())
+	err = s.confirmUserPresence(r.Context(), fmt.Sprintf("req: session\nprofile: %s\nrole: %s\naccountID: %s\n", profile.ID, roleName, accountID))
 	if err != nil {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, err.Error())
@@ -167,14 +175,6 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, "aws new session error: %s", err)
 		return
-	}
-
-	r.ParseForm()
-	roleName := r.Form.Get("role_name")
-	accountID := r.Form.Get("account_id")
-	accountName := r.Form.Get("accountName")
-	if accountName == "" {
-		accountName = "role"
 	}
 
 	ssoService := sso.New(sess)
