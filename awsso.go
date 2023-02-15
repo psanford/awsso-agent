@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/psanford/awsso-agent/browser"
 	"github.com/psanford/awsso-agent/client"
@@ -59,6 +60,7 @@ func main() {
 	rootCmd.AddCommand(loginCommand())
 	rootCmd.AddCommand(serverCommand())
 	rootCmd.AddCommand(sessionCommand())
+	rootCmd.AddCommand(credentialHelperCommand())
 	rootCmd.AddCommand(listAccountsCommand())
 	rootCmd.AddCommand(listProfilesCommand())
 
@@ -332,6 +334,80 @@ func startEnvOrPrint(creds *messages.Credentials, name string) {
 			}
 		}
 	}
+}
+
+func credentialHelperCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "credential-helper",
+		Short: "credential-helper for aws cli",
+		Run:   credentialHelperAction,
+	}
+
+	cmd.Flags().StringVarP(&accountIDF, "account-id", "", "", "Account ID")
+	cmd.Flags().StringVarP(&roleNameF, "role", "", "", "Role Name")
+	cmd.Flags().StringVarP(&accountNameF, "name", "", "", "Account Name (friendly)")
+	cmd.Flags().IntVarP(&timeoutMinutesSession, "timeout-minutes", "", 30, "Session Timeout in minutes")
+
+	cmd.ValidArgsFunction = sessionCompletions
+
+	return cmd
+}
+
+func credentialHelperAction(cmd *cobra.Command, args []string) {
+	var (
+		accountID   string
+		roleName    string
+		accountName string
+	)
+
+	client := client.NewClient()
+	err := client.Ping()
+	if err != nil {
+		log.Fatalf("Server communication error: %s", err)
+	}
+
+	if accountIDF != "" && roleNameF != "" {
+		accountID = accountIDF
+		roleName = roleNameF
+		accountName = accountNameF
+	} else {
+		log.Fatalf("usage: session --account-id <id> --role <role> [--name <friendly-name>]")
+	}
+
+	if accountID == "" || roleName == "" {
+		log.Fatalf("Invalid account")
+	}
+
+	creds, err := client.Session(profileID, accountID, roleName, accountName)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if accountName == "" {
+		accountName = fmt.Sprintf("%s-%s", accountID, roleName)
+	}
+
+	// https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sourcing-external.html
+	credHelperResult := struct {
+		Version         int    `json:"Version"`
+		AccessKeyId     string `json:"AccessKeyId"`
+		SecretAccessKey string `json:"SecretAccessKey"`
+		SessionToken    string `json:"SessionToken"`
+		Expiration      string `json:"Expiration"`
+	}{
+		Version:         1,
+		AccessKeyId:     *creds.AccessKeyId,
+		SecretAccessKey: *creds.SecretAccessKey,
+		SessionToken:    *creds.SessionToken,
+		Expiration:      creds.Expiration.Format(time.RFC3339),
+	}
+
+	out, err := json.Marshal(credHelperResult)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(string(out))
 }
 
 type environ []string

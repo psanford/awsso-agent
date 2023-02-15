@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -29,6 +30,7 @@ var (
 )
 
 type server struct {
+	mu      sync.Mutex
 	creds   map[string]*ssoToken
 	handler http.Handler
 	conf    *config.Config
@@ -123,12 +125,15 @@ func (c *server) awsSession(profile config.Profile) (*session.Session, error) {
 }
 
 func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	r.ParseForm()
 
 	profile, err := s.conf.FindProfile(r.FormValue("profile_id"))
 	if err != nil {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, err.Error())
+		log.Printf("Profile lookup failed for profile_id=%q, err=%q", r.FormValue("profile_id"), err)
 		return
 	}
 
@@ -137,6 +142,7 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	if creds == nil {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, "No creds available")
+		log.Printf("No creds found for profile=%q", profile.ID)
 		return
 	}
 
@@ -144,6 +150,7 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, err.Error())
+		log.Printf("Confirm user presence failed")
 		return
 	}
 
