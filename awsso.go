@@ -63,6 +63,7 @@ func main() {
 	rootCmd.AddCommand(credentialHelperCommand())
 	rootCmd.AddCommand(listAccountsCommand())
 	rootCmd.AddCommand(listProfilesCommand())
+	rootCmd.AddCommand(startURLCommand())
 
 	err := rootCmd.Execute()
 	if err != nil {
@@ -109,6 +110,23 @@ func loginAction(cmd *cobra.Command, args []string) {
 	}
 
 	log.Println("ok")
+}
+
+func startURLCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "start-url",
+		Short: "Show start url",
+		Run:   startURLAction,
+	}
+}
+
+func startURLAction(cmd *cobra.Command, args []string) {
+	conf := config.LoadConfig()
+	profile, err := conf.FindProfile(profileID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(profile.StartUrl)
 }
 
 func sessionCommand() *cobra.Command {
