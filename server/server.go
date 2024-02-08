@@ -52,6 +52,7 @@ func (s *server) ListenAndServe() error {
 	if err != nil {
 		return err
 	}
+	os.Chmod(config.SocketPath(), 0700)
 
 	return http.Serve(l, s.handler)
 }
