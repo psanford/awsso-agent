@@ -299,7 +299,7 @@ func startEnvOrPrint(creds *messages.Credentials, name string) {
 		env.Set("AWS_ACCESS_KEY_ID", *creds.AccessKeyId)
 		env.Set("AWS_SECRET_ACCESS_KEY", *creds.SecretAccessKey)
 		env.Set("AWS_SESSION_TOKEN", *creds.SessionToken)
-		env.Set("AWS_DEFAULT_REGION", creds.Region)
+		env.Set("AWS_REGION", creds.Region)
 		env.Set("AWSSO_PROFILE", name)
 		env.Set("AWSSO_SESSION_EXPIRATION", strconv.Itoa(int(creds.Expiration.Unix())))
 
