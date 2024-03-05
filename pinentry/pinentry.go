@@ -3,6 +3,7 @@ package pinentry
 import (
 	"context"
 	"fmt"
+	"log"
 	"os/exec"
 
 	assuan "github.com/foxcpp/go-assuan/client"
@@ -63,7 +64,13 @@ func Confirm(ctx context.Context, prompt string) (bool, error) {
 }
 
 func launch(ctx context.Context) (*pinentry.Client, *exec.Cmd, error) {
-	cmd := exec.CommandContext(ctx, "pinentry")
+	pinEntryCmd := FindPinentryGUIPath()
+	if pinEntryCmd == "" {
+		log.Printf("Failed to detect gui pinentry binary. Falling back to default `pinentry`")
+		pinEntryCmd = "pinentry"
+	}
+
+	cmd := exec.CommandContext(ctx, pinEntryCmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -88,4 +95,24 @@ func launch(ctx context.Context) (*pinentry.Client, *exec.Cmd, error) {
 		return nil, nil, err
 	}
 	return &c, cmd, nil
+}
+
+func FindPinentryGUIPath() string {
+	candidates := []string{
+		"pinentry-gnome3",
+		"pinentry-qt5",
+		"pinentry-qt4",
+		"pinentry-qt",
+		"pinentry-gtk-2",
+		"pinentry-x11",
+		"pinentry-fltk",
+		"pinentry-mac",
+	}
+	for _, candidate := range candidates {
+		p, _ := exec.LookPath(candidate)
+		if p != "" {
+			return p
+		}
+	}
+	return ""
 }
