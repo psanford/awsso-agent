@@ -4,7 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -262,7 +262,7 @@ func startEnvOrPrint(creds *messages.Credentials, name string) {
 		}
 
 		defer resp.Body.Close()
-		body, err := ioutil.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -288,7 +288,7 @@ func startEnvOrPrint(creds *messages.Credentials, name string) {
 			url.QueryEscape(signinTokenResp.SigninToken),
 		)
 
-		ok := browser.Open(loginURL)
+		ok := browser.Open(loginURL, nil)
 		if !ok {
 			log.Printf("browser open failed")
 			fmt.Println("Login url:")

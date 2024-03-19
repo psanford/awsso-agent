@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -25,6 +24,9 @@ type Profile struct {
 
 	// AWS Region. If empty string, will default to "us-east-1"
 	Region string `toml:"region"`
+
+	// Command to open url. Blank defaults to detected browser.
+	BrowserCmd []string `toml:"browser-command"`
 }
 
 func (c *Config) FindProfile(id string) (Profile, error) {
@@ -69,7 +71,7 @@ func SocketPath() string {
 
 func tryLoadConfig() (Config, error) {
 	confPath := filepath.Join(confDir(), "awsso.toml")
-	tml, err := ioutil.ReadFile(confPath)
+	tml, err := os.ReadFile(confPath)
 	if err != nil {
 		return Config{}, err
 	}

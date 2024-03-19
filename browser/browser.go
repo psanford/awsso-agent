@@ -40,11 +40,19 @@ func Commands() [][]string {
 }
 
 // Open tries to open url in a browser and reports whether it succeeded.
-func Open(url string) bool {
-	for _, args := range Commands() {
-		cmd := exec.Command(args[0], append(args[1:], url)...)
+// If preferredCmd is not nil it will be used instead of the default command search.
+func Open(url string, preferredCmd []string) bool {
+	if len(preferredCmd) != 0 {
+		cmd := exec.Command(preferredCmd[0], append(preferredCmd[1:], url)...)
 		if cmd.Start() == nil && appearsSuccessful(cmd, 3*time.Second) {
 			return true
+		}
+	} else {
+		for _, args := range Commands() {
+			cmd := exec.Command(args[0], append(args[1:], url)...)
+			if cmd.Start() == nil && appearsSuccessful(cmd, 3*time.Second) {
+				return true
+			}
 		}
 	}
 	return false
