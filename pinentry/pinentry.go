@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"runtime"
 
 	assuan "github.com/foxcpp/go-assuan/client"
 	"github.com/foxcpp/go-assuan/pinentry"
@@ -32,6 +33,14 @@ func GetPin(prompt string) (string, error) {
 }
 
 func Confirm(ctx context.Context, prompt string) (bool, error) {
+	if runtime.GOOS == "darwin" {
+		return confirmOSAScript(ctx, prompt)
+	}
+
+	return confirmPinentry(ctx, prompt)
+}
+
+func confirmPinentry(ctx context.Context, prompt string) (bool, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	p, cmd, err := launch(childCtx)
