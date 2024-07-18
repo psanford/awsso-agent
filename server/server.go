@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,6 +24,7 @@ import (
 	"github.com/psanford/awsso-agent/browser"
 	"github.com/psanford/awsso-agent/client"
 	"github.com/psanford/awsso-agent/config"
+	"github.com/psanford/awsso-agent/internal/notify"
 	"github.com/psanford/awsso-agent/messages"
 	"github.com/psanford/awsso-agent/pinentry"
 	"github.com/psanford/awsso-agent/u2f"
@@ -70,6 +75,7 @@ func New(conf *config.Config) *server {
 	mux.HandleFunc("/list_accounts_roles", s.handleListAccountRoles)
 	mux.HandleFunc("/profiles", s.handleListProfiles)
 	mux.HandleFunc("/session", s.handleSession)
+	mux.HandleFunc("/session_token", s.handleSessionToken)
 
 	s.handler = mux
 
@@ -137,6 +143,7 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	if accountName == "" {
 		accountName = "role"
 	}
+	userPresenceTokenBypassB64 := r.Form.Get("user_presence_bypass_token")
 
 	profile, err := s.conf.FindProfile(profileID)
 	if err != nil {
@@ -155,18 +162,64 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.confirmUserPresence(r.Context(), fmt.Sprintf("req: session\nprofile: %s\nrole: %s\naccountID: %s\n", profile.ID, roleName, accountID))
-	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprintf(w, err.Error())
-		log.Printf("Confirm user presence failed")
-		return
-	}
-
 	if creds.Expiration.Before(time.Now()) {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, "creds expired: %s", creds.Expiration)
 		return
+	}
+
+	var validUserPresenceTokenBypass bool
+	if userPresenceTokenBypassB64 != "" {
+		userPresenceTokenBypass, err := base64.StdEncoding.DecodeString(userPresenceTokenBypassB64)
+		if err != nil {
+			w.WriteHeader(400)
+			fmt.Fprintf(w, "invalid user presence bypass token")
+			return
+		}
+
+		now := time.Now()
+		var (
+			tokenExpired bool
+		)
+		for i := 0; i < len(creds.userPresenceTokenBypass); i++ {
+			existingToken := creds.userPresenceTokenBypass[i]
+
+			if existingToken.expiration.Before(now) {
+				if subtle.ConstantTimeCompare(existingToken.token, userPresenceTokenBypass) == 1 {
+					tokenExpired = true
+				}
+
+				// Remove expired element from slice
+				creds.userPresenceTokenBypass = append(creds.userPresenceTokenBypass[:i], creds.userPresenceTokenBypass[i+1:]...)
+				i--
+			} else if subtle.ConstantTimeCompare(existingToken.token, userPresenceTokenBypass) == 1 {
+				validUserPresenceTokenBypass = true
+			}
+		}
+
+		if tokenExpired {
+			w.WriteHeader(400)
+			fmt.Fprintf(w, err.Error())
+			log.Printf("token expired failed")
+			return
+		}
+	}
+
+	if validUserPresenceTokenBypass {
+		log.Printf(fmt.Sprintf("Auto approved: session\nprofile: %s\nrole: %s\naccountID: %s\n", profile.ID, roleName, accountID)))
+		clear := notify.ShowNotification(fmt.Sprintf("Auto approved: session\nprofile: %s\nrole: %s\naccountID: %s\n", profile.ID, roleName, accountID))
+		go func() {
+			time.Sleep(5 * time.Second)
+			clear()
+		}()
+	} else {
+		err = s.confirmUserPresence(r.Context(), fmt.Sprintf("req: session\nprofile: %s\nrole: %s\naccountID: %s\n", profile.ID, roleName, accountID))
+		if err != nil {
+			w.WriteHeader(400)
+			fmt.Fprintf(w, err.Error())
+			log.Printf("Confirm user presence failed")
+			return
+		}
 	}
 
 	sess, err := session.NewSession(&aws.Config{
@@ -201,6 +254,81 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	result := messages.Credentials{
 		Credentials: &outCreds,
 		Region:      profile.Region,
+	}
+
+	resultJson, err := json.Marshal(result)
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "marshal json error: %s", err)
+		return
+	}
+
+	_, err = w.Write(resultJson)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (s *server) handleSessionToken(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r.ParseForm()
+
+	profileID := r.FormValue("profile_id")
+	timeoutMinutesStr := r.Form.Get("timeout_minutes")
+	timeout := 10 * time.Minute
+
+	if timeoutMinutesStr != "" {
+		timeoutMin, _ := strconv.Atoi(timeoutMinutesStr)
+		if timeoutMin > 0 && timeoutMin < 60 {
+			timeout = time.Duration(timeoutMin) * time.Minute
+		}
+	}
+
+	profile, err := s.conf.FindProfile(profileID)
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, err.Error())
+		log.Printf("Profile lookup failed for profile_id=%q, err=%q", r.FormValue("profile_id"), err)
+		return
+	}
+
+	creds := s.creds[profile.ID]
+
+	if creds == nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "No creds available")
+		log.Printf("No creds found for profile=%q", profile.ID)
+		return
+	}
+
+	if creds.Expiration.Before(time.Now()) {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "creds expired: %s", creds.Expiration)
+		return
+	}
+
+	err = s.confirmUserPresence(r.Context(), fmt.Sprintf("req: session-token\nprofile: %s\ntimeout: %s\n", profile.ID, timeout))
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, err.Error())
+		log.Printf("Confirm user presence failed")
+		return
+	}
+
+	token := make([]byte, 32)
+	rand.Read(token)
+
+	bypassState := userPresenceTokenBypass{
+		expiration: time.Now().Add(timeout),
+		token:      token,
+	}
+
+	creds.userPresenceTokenBypass = append(creds.userPresenceTokenBypass, bypassState)
+
+	tokenB64 := base64.StdEncoding.EncodeToString(token)
+	result := messages.UserPresenceBypassToken{
+		Token: tokenB64,
 	}
 
 	resultJson, err := json.Marshal(result)
@@ -453,4 +581,11 @@ func (s *server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
 type ssoToken struct {
 	ssooidc.CreateTokenOutput
 	Expiration time.Time
+
+	userPresenceTokenBypass []userPresenceTokenBypass
+}
+
+type userPresenceTokenBypass struct {
+	expiration time.Time
+	token      []byte
 }

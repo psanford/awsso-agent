@@ -44,3 +44,7 @@ type LoginResponse struct {
 	LoginURL string
 	Result   string
 }
+
+type UserPresenceBypassToken struct {
+	Token string `json:"token"`
+}

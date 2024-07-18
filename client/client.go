@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -58,7 +57,7 @@ func (c *Client) Ping() error {
 	if err != nil {
 		return err
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -102,7 +101,7 @@ func (c *Client) AssumeRole(providerID, accountID, roleName, accountName string,
 	if err != nil {
 		return nil, err
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -119,17 +118,18 @@ func (c *Client) AssumeRole(providerID, accountID, roleName, accountName string,
 	return &creds, nil
 }
 
-func (c *Client) Session(providerID, accountID, roleName, accountName string) (*messages.Credentials, error) {
+func (c *Client) Session(providerID, accountID, roleName, accountName, userPresenceBypassToken string) (*messages.Credentials, error) {
 	data := make(url.Values)
 	data.Set("account_id", accountID)
 	data.Set("role_name", roleName)
 	data.Set("account_name", accountName)
 	data.Set("profile_id", providerID)
+	data.Set("user_presence_bypass_token", userPresenceBypassToken)
 	resp, err := c.httpClient.PostForm(fakeHost+"/session", data)
 	if err != nil {
 		return nil, err
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (c *Client) ListAccountsRoles(profileID string) (*messages.ListAccountsRole
 	if err != nil {
 		return nil, err
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (c *Client) ListProfiles() (*messages.ListProfilesResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -191,4 +191,31 @@ func (c *Client) ListProfiles() (*messages.ListProfilesResult, error) {
 	}
 
 	return &profiles, nil
+}
+
+func (c *Client) GetUserPresenceBypassToken(providerID string, timeoutSeconds int) (*messages.UserPresenceBypassToken, error) {
+	data := make(url.Values)
+	data.Set("profile_id", providerID)
+	if timeoutSeconds > 0 {
+		data.Set("timeout_seconds", strconv.Itoa(timeoutSeconds))
+	}
+	resp, err := c.httpClient.PostForm(fakeHost+"/session_token", data)
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Bad response from server: %d body=<%s>", resp.StatusCode, body)
+	}
+
+	var token messages.UserPresenceBypassToken
+	err = json.Unmarshal(body, &token)
+	if err != nil {
+		return nil, fmt.Errorf("Unmarshal json resp err: %s, body: <%s>", err, body)
+	}
+
+	return &token, nil
 }

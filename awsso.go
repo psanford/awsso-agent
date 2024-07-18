@@ -60,6 +60,7 @@ func main() {
 	rootCmd.AddCommand(loginCommand())
 	rootCmd.AddCommand(serverCommand())
 	rootCmd.AddCommand(sessionCommand())
+	rootCmd.AddCommand(tokenCommand())
 	rootCmd.AddCommand(credentialHelperCommand())
 	rootCmd.AddCommand(listAccountsCommand())
 	rootCmd.AddCommand(listProfilesCommand())
@@ -210,7 +211,8 @@ func sessionAction(cmd *cobra.Command, args []string) {
 		log.Fatalf("Invalid account")
 	}
 
-	creds, err := client.Session(profileID, accountID, roleName, accountName)
+	userPresenceBypassToken := os.Getenv("AWSSO_TOKEN")
+	creds, err := client.Session(profileID, accountID, roleName, accountName, userPresenceBypassToken)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -396,7 +398,8 @@ func credentialHelperAction(cmd *cobra.Command, args []string) {
 		log.Fatalf("Invalid account")
 	}
 
-	creds, err := client.Session(profileID, accountID, roleName, accountName)
+	userPresenceBypassToken := os.Getenv("AWSSO_TOKEN")
+	creds, err := client.Session(profileID, accountID, roleName, accountName, userPresenceBypassToken)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -518,6 +521,74 @@ func listProfilesAction(cmd *cobra.Command, args []string) {
 
 	for _, p := range profiles.Profiles {
 		fmt.Printf("%15.15s %15.15s %s\n", p.ID, p.Region, p.StartUrl)
+	}
+}
+
+func tokenCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "token",
+		Short: "create a user presence token",
+		Run:   tokenAction,
+	}
+
+	cmd.Flags().IntVarP(&timeoutMinutesSession, "timeout-minutes", "", 10, "Token timeout in minutes")
+
+	return cmd
+}
+
+func tokenAction(c *cobra.Command, args []string) {
+	client := client.NewClient()
+	token, err := client.GetUserPresenceBypassToken(profileID, timeoutMinutesSession)
+	if err != nil {
+		log.Fatalf("Server communication error: %s", err)
+	}
+
+	env := environ(os.Environ())
+	env.Set("AWSSO_TOKEN", token.Token)
+
+	var cmd *exec.Cmd
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/usr/bin/env bash"
+	}
+	cmd = exec.Command(shell)
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	sigs := make(chan os.Signal, 1)
+
+	signal.Notify(sigs, os.Interrupt, os.Kill)
+
+	if err := cmd.Start(); err != nil {
+		log.Fatal(err)
+	}
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+		close(waitCh)
+	}()
+
+	for {
+		select {
+		case sig := <-sigs:
+			if err := cmd.Process.Signal(sig); err != nil {
+				log.Fatal(err)
+				break
+			}
+		case err := <-waitCh:
+			var waitStatus syscall.WaitStatus
+			if exitError, ok := err.(*exec.ExitError); ok {
+				waitStatus = exitError.Sys().(syscall.WaitStatus)
+				os.Exit(waitStatus.ExitStatus())
+			}
+			if err != nil {
+				log.Fatal(err)
+			}
+			return
+		}
 	}
 }
 
