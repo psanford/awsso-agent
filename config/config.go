@@ -14,6 +14,7 @@ import (
 
 type Config struct {
 	FidoKeyHandles    []string  `toml:"fido-key-handles"`
+	UseTouchID        bool      `toml:"use-touch-id"`
 	AllowNoUserVerify bool      `toml:"allow-no-user-verify"`
 	Profile           []Profile `toml:"profile"`
 }

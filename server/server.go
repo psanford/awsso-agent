@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ansxuman/go-touchid"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sso"
@@ -87,6 +88,18 @@ func (s *server) handlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) confirmUserPresence(ctx context.Context, prompt string) error {
+	if s.conf.UseTouchID {
+		success, err := touchid.Auth(touchid.DeviceTypeAny, "awsso confirm")
+		if err != nil {
+			return err
+		}
+		if !success {
+			return errors.New("touchid auth error")
+		}
+
+		return nil
+	}
+
 	if len(s.conf.FidoKeyHandles) == 0 && s.conf.AllowNoUserVerify {
 		return nil
 	}
@@ -206,7 +219,7 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if validUserPresenceTokenBypass {
-		log.Printf(fmt.Sprintf("Auto approved: session\nprofile: %s\nrole: %s\naccountID: %s\n", profile.ID, roleName, accountID)))
+		log.Printf(fmt.Sprintf("Auto approved: session\nprofile: %s\nrole: %s\naccountID: %s\n", profile.ID, roleName, accountID))
 		clear := notify.ShowNotification(fmt.Sprintf("Auto approved: session\nprofile: %s\nrole: %s\naccountID: %s\n", profile.ID, roleName, accountID))
 		go func() {
 			time.Sleep(5 * time.Second)

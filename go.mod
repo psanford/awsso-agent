@@ -1,9 +1,12 @@
 module github.com/psanford/awsso-agent
 
-go 1.18
+go 1.23.2
+
+toolchain go1.23.4
 
 require (
 	github.com/BurntSushi/toml v1.2.0
+	github.com/ansxuman/go-touchid v0.0.0-20241021115423-60941306d4c3
 	github.com/aws/aws-sdk-go v1.44.116
 	github.com/flynn/hid v0.0.0-20190502022136-f1b9b6cc019a
 	github.com/flynn/u2f v0.0.0-20180613185708-15554eb68e5d
