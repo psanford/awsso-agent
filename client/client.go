@@ -71,9 +71,12 @@ func (c *Client) Ping() error {
 	return nil
 }
 
-func (c *Client) Login(profileID string) error {
+func (c *Client) Login(profileID string, useDeviceFlow bool) error {
 	args := make(url.Values)
 	args.Add("profile_id", profileID)
+	if useDeviceFlow {
+		args.Add("use_device_flow", "true")
+	}
 	resp, err := c.httpClient.PostForm(fakeHost+"/login", args)
 	if err != nil {
 		return err
