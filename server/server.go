@@ -17,11 +17,11 @@ import (
 	"time"
 
 	"github.com/ansxuman/go-touchid"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/sso"
-	"github.com/aws/aws-sdk-go/service/ssooidc"
-	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sso"
+	"github.com/aws/aws-sdk-go-v2/service/ssooidc"
+	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 	"github.com/psanford/awsso-agent/browser"
 	"github.com/psanford/awsso-agent/client"
 	"github.com/psanford/awsso-agent/config"
@@ -137,11 +137,10 @@ func (s *server) confirmUserPresence(ctx context.Context, prompt string) error {
 	return nil
 }
 
-func (c *server) awsSession(profile config.Profile) (*session.Session, error) {
-	return session.NewSession(&aws.Config{
-		// LogLevel: aws.LogLevel(aws.LogDebug),
-		Region: aws.String(profile.Region),
-	})
+func (c *server) awsConfig(ctx context.Context, profile config.Profile) (aws.Config, error) {
+	return awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithRegion(profile.Region),
+	)
 }
 
 func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -235,17 +234,15 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(profile.Region),
-	})
+	cfg, err := s.awsConfig(r.Context(), profile)
 	if err != nil {
 		w.WriteHeader(400)
-		fmt.Fprintf(w, "aws new session error: %s", err)
+		fmt.Fprintf(w, "aws config error: %s", err)
 		return
 	}
 
-	ssoService := sso.New(sess)
-	roleResp, err := ssoService.GetRoleCredentials(&sso.GetRoleCredentialsInput{
+	ssoService := sso.NewFromConfig(cfg)
+	roleResp, err := ssoService.GetRoleCredentials(r.Context(), &sso.GetRoleCredentialsInput{
 		AccessToken: creds.AccessToken,
 		AccountId:   &accountID,
 		RoleName:    &roleName,
@@ -256,8 +253,8 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exp := time.UnixMilli(*roleResp.RoleCredentials.Expiration)
-	outCreds := sts.Credentials{
+	exp := time.UnixMilli(roleResp.RoleCredentials.Expiration)
+	outCreds := types.Credentials{
 		AccessKeyId:     roleResp.RoleCredentials.AccessKeyId,
 		SecretAccessKey: roleResp.RoleCredentials.SecretAccessKey,
 		SessionToken:    roleResp.RoleCredentials.SessionToken,
@@ -368,23 +365,23 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := s.awsSession(profile)
+	cfg, err := s.awsConfig(ctx, profile)
 	if err != nil {
 		w.WriteHeader(400)
-		fmt.Fprintf(w, "aws new session error: %s", err)
+		fmt.Fprintf(w, "aws config error: %s", err)
 		return
 	}
 
-	oidcService := ssooidc.New(sess)
+	oidcService := ssooidc.NewFromConfig(cfg)
 
-	deviceCreds, err := s.getOIDCCreds(oidcService, profile.ID)
+	deviceCreds, err := s.getOIDCCreds(ctx, oidcService, profile.ID)
 	if err != nil {
 		w.WriteHeader(400)
 		fmt.Fprintf(w, "get device oidc creds err: %s", err)
 		return
 	}
 
-	startAuthResp, err := oidcService.StartDeviceAuthorization(&ssooidc.StartDeviceAuthorizationInput{
+	startAuthResp, err := oidcService.StartDeviceAuthorization(ctx, &ssooidc.StartDeviceAuthorizationInput{
 		StartUrl:     &profile.StartUrl,
 		ClientId:     &deviceCreds.ClientID,
 		ClientSecret: &deviceCreds.ClientSecret,
@@ -418,7 +415,7 @@ OUTER:
 		default:
 		}
 
-		tokenResp, err := oidcService.CreateToken(&ssooidc.CreateTokenInput{
+		tokenResp, err := oidcService.CreateToken(ctx, &ssooidc.CreateTokenInput{
 			ClientId:     &deviceCreds.ClientID,
 			ClientSecret: &deviceCreds.ClientSecret,
 			DeviceCode:   startAuthResp.DeviceCode,
@@ -440,7 +437,7 @@ OUTER:
 
 	tok := ssoToken{
 		CreateTokenOutput: *completedToken,
-		Expiration:        time.Now().Add(time.Duration(*completedToken.ExpiresIn) * time.Second),
+		Expiration:        time.Now().Add(time.Duration(completedToken.ExpiresIn) * time.Second),
 	}
 
 	s.creds[profile.ID] = &tok
@@ -450,10 +447,10 @@ OUTER:
 // getOIDCCreds gets the device authorized creds necessary to then perform
 // user auth. These creds have no access to any resources within an AWS account
 // on their own.
-func (s *server) getOIDCCreds(oidcService *ssooidc.SSOOIDC, profileID string) (*oidcDeviceCreds, error) {
+func (s *server) getOIDCCreds(ctx context.Context, oidcService *ssooidc.Client, profileID string) (*oidcDeviceCreds, error) {
 	f, err := os.Open(config.OIDCCachePath(profileID))
 	if err != nil {
-		return s.fetchAndCacheNewOIDCCreds(oidcService, profileID)
+		return s.fetchAndCacheNewOIDCCreds(ctx, oidcService, profileID)
 	}
 
 	defer f.Close()
@@ -461,19 +458,19 @@ func (s *server) getOIDCCreds(oidcService *ssooidc.SSOOIDC, profileID string) (*
 	var creds oidcDeviceCreds
 	err = dec.Decode(&creds)
 	if err != nil {
-		return s.fetchAndCacheNewOIDCCreds(oidcService, profileID)
+		return s.fetchAndCacheNewOIDCCreds(ctx, oidcService, profileID)
 	}
 
 	exp := time.Unix(creds.ClientSecretExpiresAt, 0)
 	if exp.Before(time.Now()) {
-		return s.fetchAndCacheNewOIDCCreds(oidcService, profileID)
+		return s.fetchAndCacheNewOIDCCreds(ctx, oidcService, profileID)
 	}
 
 	return &creds, nil
 }
 
-func (s *server) fetchAndCacheNewOIDCCreds(service *ssooidc.SSOOIDC, profileID string) (*oidcDeviceCreds, error) {
-	resp, err := service.RegisterClient(&ssooidc.RegisterClientInput{
+func (s *server) fetchAndCacheNewOIDCCreds(ctx context.Context, service *ssooidc.Client, profileID string) (*oidcDeviceCreds, error) {
+	resp, err := service.RegisterClient(ctx, &ssooidc.RegisterClientInput{
 		ClientName: aws.String("awsesh"),
 		ClientType: aws.String("public"),
 	})
@@ -482,9 +479,9 @@ func (s *server) fetchAndCacheNewOIDCCreds(service *ssooidc.SSOOIDC, profileID s
 	}
 	creds := oidcDeviceCreds{
 		ClientID:              *resp.ClientId,
-		ClientIDIssuedAt:      *resp.ClientIdIssuedAt,
+		ClientIDIssuedAt:      resp.ClientIdIssuedAt,
 		ClientSecret:          *resp.ClientSecret,
-		ClientSecretExpiresAt: *resp.ClientSecretExpiresAt,
+		ClientSecretExpiresAt: resp.ClientSecretExpiresAt,
 	}
 
 	f, err := os.Create(config.OIDCCachePath(profileID))
@@ -526,14 +523,14 @@ func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	sess, err := s.awsSession(profile)
+	cfg, err := s.awsConfig(ctx, profile)
 	if err != nil {
 		w.WriteHeader(400)
-		fmt.Fprintf(w, "aws new session err: %s", err)
+		fmt.Fprintf(w, "aws config err: %s", err)
 		return
 	}
 
-	ssoService := sso.New(sess)
+	ssoService := sso.NewFromConfig(cfg)
 
 	var roleResult messages.ListAccountsRolesResult
 
@@ -541,13 +538,30 @@ func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) 
 		AccessToken: cred.AccessToken,
 	}
 
-	err = ssoService.ListAccountsPages(acctInput, func(lao *sso.ListAccountsOutput, b bool) bool {
+	paginator := sso.NewListAccountsPaginator(ssoService, acctInput)
+	for paginator.HasMorePages() {
+		lao, err := paginator.NextPage(ctx)
+		if err != nil {
+			w.WriteHeader(400)
+			fmt.Fprintf(w, "list accounts err: %s", err)
+			return
+		}
+
 		for _, acct := range lao.AccountList {
 			roleInput := &sso.ListAccountRolesInput{
 				AccessToken: cred.AccessToken,
 				AccountId:   acct.AccountId,
 			}
-			err = ssoService.ListAccountRolesPagesWithContext(ctx, roleInput, func(laro *sso.ListAccountRolesOutput, b bool) bool {
+
+			rolePaginator := sso.NewListAccountRolesPaginator(ssoService, roleInput)
+			for rolePaginator.HasMorePages() {
+				laro, err := rolePaginator.NextPage(ctx)
+				if err != nil {
+					w.WriteHeader(400)
+					fmt.Fprintf(w, "list roles err: %s", err)
+					return
+				}
+
 				for _, role := range laro.RoleList {
 					roleResult.Accounts = append(roleResult.Accounts, messages.Account{
 						AccountID:    *acct.AccountId,
@@ -556,23 +570,8 @@ func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) 
 						RoleName:     *role.RoleName,
 					})
 				}
-				return true
-			})
-
-			if err != nil {
-				w.WriteHeader(400)
-				fmt.Fprintf(w, "list roles err: %s", err)
-				return false
 			}
-
 		}
-
-		return true
-	})
-	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprintf(w, "list accounts err: %s", err)
-		return
 	}
 
 	json.NewEncoder(w).Encode(roleResult)

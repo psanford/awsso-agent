@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 )
 
 type Credentials struct {
-	*sts.Credentials
+	*types.Credentials
 	Region string
 }
 
