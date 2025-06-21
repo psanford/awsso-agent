@@ -145,121 +145,6 @@ func (c *server) awsConfig(ctx context.Context, profile config.Profile) (aws.Con
 	)
 }
 
-func (s *server) doPKCEFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, oidcService *ssooidc.Client, profile config.Profile) error {
-	flusher := w.(http.Flusher)
-
-	// Generate PKCE parameters
-	codeVerifier, err := generateCodeVerifier()
-	if err != nil {
-		return fmt.Errorf("generate code verifier: %w", err)
-	}
-	codeChallenge := generateCodeChallenge(codeVerifier)
-
-	// Generate state for CSRF protection
-	stateBytes := make([]byte, 16)
-	if _, err := rand.Read(stateBytes); err != nil {
-		return fmt.Errorf("generate state: %w", err)
-	}
-	state := base64.URLEncoding.EncodeToString(stateBytes)
-
-	// Start OAuth callback server
-	callbackServer, err := NewOAuthCallbackServer()
-	if err != nil {
-		return fmt.Errorf("create callback server: %w", err)
-	}
-	defer callbackServer.Shutdown()
-
-	callbackServer.Start()
-	redirectURI := callbackServer.GetCallbackURL()
-
-	// Register client with authorization code support
-	registerInput := &ssooidc.RegisterClientInput{
-		ClientName:   aws.String("awsso-agent"),
-		ClientType:   aws.String("public"),
-		GrantTypes:   []string{"authorization_code", "refresh_token"},
-		IssuerUrl:    aws.String(profile.StartUrl),
-		RedirectUris: []string{redirectURI},
-		Scopes:       []string{"sso:account:access"},
-	}
-
-	registerResp, err := oidcService.RegisterClient(ctx, registerInput)
-	if err != nil {
-		return fmt.Errorf("register client: %w", err)
-	}
-
-	// Get the OIDC provider base URL from the start URL
-	// The start URL is like: https://mycompany.awsapps.com/start
-	// The OIDC URL would be: https://oidc.{region}.amazonaws.com
-	// We'll use the profile's region for this
-	region := profile.Region
-	if region == "" {
-		region = "us-east-1"
-	}
-	baseURL := fmt.Sprintf("https://oidc.%s.amazonaws.com", region)
-
-	// Build authorization URL
-	authURL := BuildAuthorizationURL(
-		baseURL,
-		*registerResp.ClientId,
-		redirectURI,
-		state,
-		codeChallenge,
-		[]string{"sso:account:access"},
-	)
-
-	fmt.Fprintf(w, "Opening browser for authorization...\n")
-	fmt.Fprintf(w, "If browser doesn't open, visit: %s\n", authURL)
-	flusher.Flush()
-
-	// Open browser
-	if ok := browser.Open(authURL, profile.BrowserCmd); !ok {
-		fmt.Fprintf(w, "Failed to open browser automatically\n")
-		flusher.Flush()
-	}
-
-	// Wait for callback (5 minute timeout)
-	fmt.Fprintf(w, "Waiting for authorization...\n")
-	flusher.Flush()
-
-	authCode, returnedState, err := callbackServer.WaitForCode(5 * time.Minute)
-	if err != nil {
-		return fmt.Errorf("wait for authorization: %w", err)
-	}
-
-	// Verify state
-	if returnedState != state {
-		return fmt.Errorf("state mismatch: expected %s, got %s", state, returnedState)
-	}
-
-	// Exchange authorization code for token
-	tokenInput := &ssooidc.CreateTokenInput{
-		ClientId:     registerResp.ClientId,
-		ClientSecret: registerResp.ClientSecret,
-		GrantType:    aws.String(grantTypeAuthCode),
-		Code:         aws.String(authCode),
-		CodeVerifier: aws.String(codeVerifier),
-		RedirectUri:  aws.String(redirectURI),
-	}
-
-	tokenResp, err := oidcService.CreateToken(ctx, tokenInput)
-	if err != nil {
-		return fmt.Errorf("create token: %w", err)
-	}
-
-	// Store the token
-	tok := ssoToken{
-		CreateTokenOutput: *tokenResp,
-		Expiration:        time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
-	}
-
-	s.mu.Lock()
-	s.creds[profile.ID] = &tok
-	s.mu.Unlock()
-
-	fmt.Fprintf(w, "ok!\n")
-	return nil
-}
-
 func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -328,7 +213,6 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 
 		if tokenExpired {
 			w.WriteHeader(400)
-			fmt.Fprintf(w, err.Error())
 			log.Printf("token expired failed")
 			return
 		}
@@ -491,87 +375,126 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	oidcService := ssooidc.NewFromConfig(cfg)
 
-	// Check if we should use PKCE flow (default) or device flow
-	useDeviceFlow := r.FormValue("use_device_flow") == "true"
-
-	if !useDeviceFlow {
-		// Try PKCE flow first
-		if err := s.doPKCEFlow(ctx, w, r, oidcService, profile); err == nil {
-			return
-		}
-		// If PKCE fails, fall back to device flow
-		fmt.Fprintf(w, "PKCE flow failed: %v\nFalling back to device flow...\n", err)
-	}
-
-	// Device flow fallback
-	deviceCreds, err := s.getOIDCCreds(ctx, oidcService, profile.ID)
-	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprintf(w, "get device oidc creds err: %s", err)
-		return
-	}
-
-	// For now, use the device code flow
-	startAuthResp, err := oidcService.StartDeviceAuthorization(ctx, &ssooidc.StartDeviceAuthorizationInput{
-		StartUrl:     &profile.StartUrl,
-		ClientId:     &deviceCreds.ClientID,
-		ClientSecret: &deviceCreds.ClientSecret,
-	})
-	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprintf(w, "start device authorization err: %s", err)
-		return
-	}
-
 	flusher := w.(http.Flusher)
 
-	fmt.Fprintf(w, "Complete verification at:\n%s\n", *startAuthResp.VerificationUriComplete)
+	// Generate PKCE parameters
+	codeVerifier, err := generateCodeVerifier()
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "generate code verifier: %s", err)
+		return
+	}
+	codeChallenge := generateCodeChallenge(codeVerifier)
+
+	// Generate state for CSRF protection
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "generate state: %s", err)
+		return
+	}
+	state := base64.URLEncoding.EncodeToString(stateBytes)
+
+	// Start OAuth callback server
+	callbackServer, err := NewOAuthCallbackServer()
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "create callback server: %s", err)
+		return
+	}
+	defer callbackServer.Shutdown()
+
+	callbackServer.Start()
+	redirectURI := callbackServer.GetCallbackURL()
+
+	// Register client with authorization code support
+	registerInput := &ssooidc.RegisterClientInput{
+		ClientName:   aws.String("awsso-agent"),
+		ClientType:   aws.String("public"),
+		GrantTypes:   []string{"authorization_code", "refresh_token"},
+		IssuerUrl:    aws.String(profile.StartUrl),
+		RedirectUris: []string{redirectURI},
+		Scopes:       []string{"sso:account:access"},
+	}
+
+	registerResp, err := oidcService.RegisterClient(ctx, registerInput)
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "register client: %s", err)
+		return
+	}
+
+	region := profile.Region
+	if region == "" {
+		region = "us-east-1"
+	}
+	baseURL := fmt.Sprintf("https://oidc.%s.amazonaws.com", region)
+
+	// Build authorization URL
+	authURL := BuildAuthorizationURL(
+		baseURL,
+		*registerResp.ClientId,
+		redirectURI,
+		state,
+		codeChallenge,
+		[]string{"sso:account:access"},
+	)
+
+	fmt.Fprintf(w, "Opening browser for authorization...\n")
+	fmt.Fprintf(w, "If browser doesn't open, visit: %s\n", authURL)
 	flusher.Flush()
 
-	ok := browser.Open(*startAuthResp.VerificationUriComplete, profile.BrowserCmd)
-	if !ok {
-		fmt.Fprintf(w, "Failed to open browser\n")
+	// Open browser
+	if ok := browser.Open(authURL, profile.BrowserCmd); !ok {
+		fmt.Fprintf(w, "Failed to open browser automatically\n")
 		flusher.Flush()
 	}
 
-	var completedToken *ssooidc.CreateTokenOutput
-	timeout := time.After(120 * time.Second)
-OUTER:
-	for {
-		select {
-		case <-ctx.Done():
-			break OUTER
-		case <-timeout:
-			break OUTER
-		default:
-		}
+	// Wait for callback (5 minute timeout)
+	fmt.Fprintf(w, "Waiting for authorization...\n")
+	flusher.Flush()
 
-		tokenResp, err := oidcService.CreateToken(ctx, &ssooidc.CreateTokenInput{
-			ClientId:     &deviceCreds.ClientID,
-			ClientSecret: &deviceCreds.ClientSecret,
-			DeviceCode:   startAuthResp.DeviceCode,
-			GrantType:    &grantTypeDevice,
-		})
-		if err == nil {
-			completedToken = tokenResp
-			break
-		}
-
-		time.Sleep(2 * time.Second)
-	}
-
-	if completedToken == nil {
+	authCode, returnedState, err := callbackServer.WaitForCode(5 * time.Minute)
+	if err != nil {
 		w.WriteHeader(400)
-		fmt.Fprintf(w, "CreateToken timed out\n")
+		fmt.Fprintf(w, "wait for authorization: %s", err)
 		return
 	}
 
-	tok := ssoToken{
-		CreateTokenOutput: *completedToken,
-		Expiration:        time.Now().Add(time.Duration(completedToken.ExpiresIn) * time.Second),
+	// Verify state
+	if returnedState != state {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "state mismatch: expected %s, got %s", state, returnedState)
+		return
 	}
 
+	// Exchange authorization code for token
+	tokenInput := &ssooidc.CreateTokenInput{
+		ClientId:     registerResp.ClientId,
+		ClientSecret: registerResp.ClientSecret,
+		GrantType:    aws.String(grantTypeAuthCode),
+		Code:         aws.String(authCode),
+		CodeVerifier: aws.String(codeVerifier),
+		RedirectUri:  aws.String(redirectURI),
+	}
+
+	tokenResp, err := oidcService.CreateToken(ctx, tokenInput)
+	if err != nil {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "create token: %s", err)
+		return
+	}
+
+	// Store the token
+	tok := ssoToken{
+		CreateTokenOutput: *tokenResp,
+		Expiration:        time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
+	}
+
+	s.mu.Lock()
 	s.creds[profile.ID] = &tok
+	s.mu.Unlock()
+
 	fmt.Fprintf(w, "ok!")
 }
 
@@ -601,10 +524,6 @@ func (s *server) getOIDCCreds(ctx context.Context, oidcService *ssooidc.Client, 
 }
 
 func (s *server) fetchAndCacheNewOIDCCreds(ctx context.Context, service *ssooidc.Client, profileID string) (*oidcDeviceCreds, error) {
-	// TODO: When PKCE support is available, update registration to include:
-	// - GrantTypes: []string{"authorization_code", "refresh_token"}
-	// - RedirectUris: []string{"https://127.0.0.1:<port>/oauth/callback"}
-	// - Scopes: []string{"sso:account:access"}
 	resp, err := service.RegisterClient(ctx, &ssooidc.RegisterClientInput{
 		ClientName: aws.String("awsesh"),
 		ClientType: aws.String("public"),

@@ -35,7 +35,6 @@ var (
 	roleNameF             string
 	accountNameF          string
 	csvF                  bool
-	useDeviceFlow         bool
 
 	rootCmd = &cobra.Command{
 		Use:   "awsso",
@@ -96,7 +95,6 @@ func loginCommand() *cobra.Command {
 		Short: "login command",
 		Run:   loginAction,
 	}
-	cmd.Flags().BoolVar(&useDeviceFlow, "use-device-flow", false, "Use device code flow instead of PKCE")
 	return cmd
 }
 
@@ -108,7 +106,7 @@ func loginAction(cmd *cobra.Command, args []string) {
 		log.Fatalf("Server communication error: %s", err)
 	}
 
-	err = client.Login(profileID, useDeviceFlow)
+	err = client.Login(profileID)
 	if err != nil {
 		log.Fatalf("Login error: %s", err)
 	}
