@@ -90,11 +90,12 @@ func serverAction(cmd *cobra.Command, args []string) {
 }
 
 func loginCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "login command",
 		Run:   loginAction,
 	}
+	return cmd
 }
 
 func loginAction(cmd *cobra.Command, args []string) {
