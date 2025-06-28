@@ -167,18 +167,11 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	creds := s.creds[profile.ID]
-
-	if creds == nil {
+	creds, err := s.ssoTokenForProfile(r.Context(), profile.ID)
+	if err != nil {
 		w.WriteHeader(400)
-		fmt.Fprintf(w, "No creds available")
-		log.Printf("No creds found for profile=%q", profile.ID)
-		return
-	}
-
-	if creds.Expiration.Before(time.Now()) {
-		w.WriteHeader(400)
-		fmt.Fprintf(w, "creds expired: %s", creds.Expiration)
+		fmt.Fprintf(w, "Failed to get valid credentials: %s", err)
+		log.Printf("Failed to get valid credentials for profile=%q: %v", profile.ID, err)
 		return
 	}
 
@@ -304,18 +297,11 @@ func (s *server) handleSessionToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	creds := s.creds[profile.ID]
-
-	if creds == nil {
+	creds, err := s.ssoTokenForProfile(r.Context(), profile.ID)
+	if err != nil {
 		w.WriteHeader(400)
-		fmt.Fprintf(w, "No creds available")
-		log.Printf("No creds found for profile=%q", profile.ID)
-		return
-	}
-
-	if creds.Expiration.Before(time.Now()) {
-		w.WriteHeader(400)
-		fmt.Fprintf(w, "creds expired: %s", creds.Expiration)
+		fmt.Fprintf(w, "Failed to get valid credentials: %s", err)
+		log.Printf("Failed to get valid credentials for profile=%q: %v", profile.ID, err)
 		return
 	}
 
@@ -489,6 +475,8 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	tok := ssoToken{
 		CreateTokenOutput: *tokenResp,
 		Expiration:        time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
+		OIDCClientID:      *registerResp.ClientId,
+		OIDCClientSecret:  *registerResp.ClientSecret,
 	}
 
 	s.mu.Lock()
@@ -560,6 +548,8 @@ type oidcDeviceCreds struct {
 }
 
 func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ctx := r.Context()
 	r.ParseForm()
 
@@ -570,10 +560,10 @@ func (s *server) handleListAccountRoles(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cred := s.creds[profile.ID]
-	if cred == nil {
+	cred, err := s.ssoTokenForProfile(ctx, profile.ID)
+	if err != nil {
 		w.WriteHeader(400)
-		fmt.Fprintf(w, "no creds available")
+		fmt.Fprintf(w, "Failed to get valid credentials: %s", err)
 		return
 	}
 
@@ -648,6 +638,9 @@ type ssoToken struct {
 	ssooidc.CreateTokenOutput
 	Expiration time.Time
 
+	OIDCClientID     string
+	OIDCClientSecret string
+
 	userPresenceTokenBypass []userPresenceTokenBypass
 }
 
@@ -677,4 +670,74 @@ func generateCodeChallenge(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	// Use standard base64 URL encoding (with padding), matching AWS CLI
 	return base64.URLEncoding.EncodeToString(h[:])
+}
+
+func (s *server) refreshToken(ctx context.Context, token *ssoToken) (*ssoToken, error) {
+	if token.RefreshToken == nil {
+		return nil, errors.New("no refresh token available")
+	}
+
+	cfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load aws config: %w", err)
+	}
+
+	oidcService := ssooidc.NewFromConfig(cfg)
+
+	tokenInput := &ssooidc.CreateTokenInput{
+		ClientId:     aws.String(token.OIDCClientID),
+		ClientSecret: aws.String(token.OIDCClientSecret),
+		GrantType:    aws.String("refresh_token"),
+		RefreshToken: token.RefreshToken,
+	}
+
+	tokenResp, err := oidcService.CreateToken(ctx, tokenInput)
+	if err != nil {
+		return nil, fmt.Errorf("refresh token: %w", err)
+	}
+
+	newToken := &ssoToken{
+		CreateTokenOutput:       *tokenResp,
+		Expiration:              time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
+		OIDCClientID:            token.OIDCClientID,
+		OIDCClientSecret:        token.OIDCClientSecret,
+		userPresenceTokenBypass: token.userPresenceTokenBypass,
+	}
+
+	return newToken, nil
+}
+
+// ssoTokenForProfile assumes the caller already holds s.mu
+func (s *server) ssoTokenForProfile(ctx context.Context, profileID string) (*ssoToken, error) {
+	creds := s.creds[profileID]
+	if creds == nil {
+		return nil, errors.New("no credentials available")
+	}
+
+	if creds.Expiration.Before(time.Now().Add(30 * time.Second)) {
+		credsCopy := *creds
+
+		s.mu.Unlock()
+		refreshed, err := s.refreshToken(ctx, &credsCopy)
+		s.mu.Lock()
+
+		if err != nil {
+			currentCreds := s.creds[profileID]
+			if currentCreds != nil && currentCreds.Expiration.After(time.Now()) {
+				return currentCreds, nil
+			}
+
+			if creds.Expiration.Before(time.Now()) {
+				return nil, fmt.Errorf("token expired and refresh failed: %w", err)
+			}
+			log.Printf("Token refresh failed but token still valid for profile %s: %v", profileID, err)
+			return creds, nil
+		}
+
+		s.creds[profileID] = refreshed
+		log.Printf("Successfully refreshed token for profile %s", profileID)
+		return refreshed, nil
+	}
+
+	return creds, nil
 }
